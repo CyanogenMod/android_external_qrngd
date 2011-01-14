@@ -280,9 +280,9 @@ int main(int argc, char **argv)
 	} while (!done);
 
 	if (pass_test)
-		printf("Test passed!\n");
+		printf("\nTest passed!\n");
 	else {
-		printf("Test failed!\n");
+		printf("\nTest failed!\n");
 		exitval = EXIT_RANDOM_TEST_FAILED;
 	}
 
