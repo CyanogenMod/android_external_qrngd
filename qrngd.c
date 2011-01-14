@@ -292,7 +292,7 @@ int main(int argc, char **argv)
 	/* open hardware random device */
 	random_hw_fd = open(user_ops.input_device_name, O_RDONLY);
 	if (random_hw_fd < 0) {
-		fprintf(stderr, "Can't open hardware random device file %s", user_ops.input_device_name);
+		fprintf(stderr, "Can't open hardware random device file %s\n", user_ops.input_device_name);
 		exitval = 1;
 		goto exit;
 	}
