@@ -63,15 +63,12 @@ typedef unsigned char bool;
 #define MAX_ENT_POOL_BITS  4096
 #define MAX_ENT_POOL_BYTES (MAX_ENT_POOL_BITS / 8)
 
-/* We don't want to monopolize the entropy pool with hardware
- * sources so define some limits so others can also add to pool. */
-#define MAX_ENT_POOL_HIGHWATER_MARK (MAX_ENT_POOL_BYTES / 2) /* use half */
-#define MAX_ENT_POOL_WRITES 128  	/* write pool with smaller chunks */
+#define MAX_ENT_POOL_WRITES 128  		/* write pool with smaller chunks */
 
-/* Burst-mode timeout in us (micro-seconds) */
-#define BURST_MODE_TIMEOUT 100000		/* 100ms */
-/* Idle-mode wait in us (micro-seconds) */
-#define IDLE_MODE_WAIT 10000			/* 10ms */
+///* Burst-mode timeout in us (micro-seconds) */
+//#define BURST_MODE_TIMEOUT 100000		/* 100ms */
+///* Idle-mode wait in us (micro-seconds) */
+//#define IDLE_MODE_WAIT 10000			/* 10ms */
 
 /* Buffer to hold hardware entropy bytes (this must be 2KB for FIPS testing       */
 #define MAX_BUFFER 2048				/* do not change this value       */
@@ -80,42 +77,42 @@ static unsigned long buffsize;			/* size of data in buffer         */
 static unsigned long curridx;			/* position of current index      */
 
 /* Globals */
-static bool read_blocked = FALSE;
-static pid_t qrngd_pid;
+//static bool read_blocked = FALSE;
+//static pid_t qrngd_pid;
 
 /* User parameters */
 struct user_options {
 	char            input_device_name[128];
 	char            output_device_name[128];
-	bool		run_as_daemon;
+	bool            run_as_daemon;
 };
 
 /* Version number of this source */
-#define APP_VERSION "1.00c"
+#define APP_VERSION "1.01"
 #define APP_NAME    "qrngd"
 
 const char *program_version =
-	APP_NAME " " APP_VERSION "\n"
-	"Copyright (c) 2011, Code Aurora Forum. All rights reserved.\n"
-	"This is free software; see the source for copying conditions.  There is NO\n"
-	"warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n";
+APP_NAME " " APP_VERSION "\n"
+"Copyright (c) 2011, Code Aurora Forum. All rights reserved.\n"
+"This is free software; see the source for copying conditions.  There is NO\n"
+"warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n";
 
 const char *program_usage =
-	"Usage: " APP_NAME " [OPTION...]\n"
-	"  -b                 background - become a daemon (default)\n"
-	"  -f                 foreground - do not fork and become a daemon\n"
-	"  -r <device name>   hardware random input device (default: /dev/hw_random)\n"
-	"  -o <device name>   system random output device (default: /dev/random)\n"
-	"  -h                 help (this page)\n";
+"Usage: " APP_NAME " [OPTION...]\n"
+"  -b                 background - become a daemon (default)\n"
+"  -f                 foreground - do not fork and become a daemon\n"
+"  -r <device name>   hardware random input device (default: /dev/hw_random)\n"
+"  -o <device name>   system random output device (default: /dev/random)\n"
+"  -h                 help (this page)\n";
 
 /* Logging information */
 enum log_level {
-    DEBUG = 0,
-    INFO = 1,
-    WARNING = 2,
-    ERROR = 3,
-    FATAL = 4,
-    LOG_MAX = 4,
+	DEBUG = 0,
+	INFO = 1,
+	WARNING = 2,
+	ERROR = 3,
+	FATAL = 4,
+	LOG_MAX = 4,
 };
 
 /* Logging function for outputing to stderr or log */
@@ -173,7 +170,7 @@ static int get_user_options(struct user_options *user_ops, int argc, char **argv
 
 			case 'r':
 				if (itr < max_params) {
-					if(strlen(argv[itr]) < sizeof(user_ops->input_device_name))
+					if (strlen(argv[itr]) < sizeof(user_ops->input_device_name))
 						strcpy(user_ops->input_device_name, argv[itr++]);
 					else
 						return -1;
@@ -184,7 +181,7 @@ static int get_user_options(struct user_options *user_ops, int argc, char **argv
 
 			case 'o':
 				if (itr < max_params) {
-					if(strlen(argv[itr]) < sizeof(user_ops->output_device_name))
+					if (strlen(argv[itr]) < sizeof(user_ops->output_device_name))
 						strcpy(user_ops->output_device_name, argv[itr++]);
 					else
 						return -1;
@@ -211,18 +208,37 @@ static int fips_test(const unsigned char *buf, size_t size)
 	unsigned long *buff_ul = (unsigned long *) buf;
 	size_t size_ul = size >> 2;	/* convert byte to word size */
 	unsigned long last_value;
+	unsigned int rnd_ctr[256];
+	int i;
 
+
+	/* Continuous Random Number Generator Test */
 	last_value = *(buff_ul++);
 	size_ul--;
 
 	while (size_ul > 0) {
-		if (*buff_ul == last_value)
+		if (*buff_ul == last_value) {
+			log_print(ERROR, "ERROR: Bad word value from hardware.");
 			return -1;
-		else
+		} else
 			last_value = *buff_ul;
 		buff_ul++;
 		size_ul--;
 	}
+
+	/* count each random number */
+	for (i = 0; i < size; ++i) {
+		rnd_ctr[buf[i]]++;
+	}
+
+	/* check random numbers to make sure they are not bogus */
+	for (i = 0; i < 256; ++i) {
+		if (rnd_ctr[i] == 0) {
+			log_print(ERROR, "ERROR: Bad spectral random number sample.");
+			return -1;
+		}
+	}
+
 	return 0;
 }
 
@@ -250,12 +266,6 @@ static int read_src(int fd, void *buf, size_t size)
 	return 0;
 }
 
-/* Bust-mode timer timeout */
-static void timeout(int signum)
-{
-	read_blocked = FALSE;
-}
-
 /* The beginning of everything */
 int main(int argc, char **argv)
 {
@@ -266,10 +276,6 @@ int main(int argc, char **argv)
 	int ent_count;				/* current system entropy            */
 	int write_size;				/* max entropy data to pass          */
 	struct pollfd fds[1];			/* used for polling file descriptor  */
-	struct itimerval itv;			/* burst-mode timer                  */
-	struct sigaction act, act_org;		/* signal used for timer expiration  */
-	bool signal_enabled = FALSE;		/* flag to indicate signal used      */
-	bool timer_enabled  = FALSE;		/* flag to indicate timer enabled    */
 	int ret;
 	int exitval = 0;
 
@@ -313,21 +319,10 @@ int main(int argc, char **argv)
 		goto exit;
 	}
 
-	/* initialize timer signal */
-	memset(&act, 0, sizeof(act));
-	act.sa_handler = timeout;
-	sigaction(SIGALRM, &act, &act_org);
-	signal_enabled = TRUE;
-
-	/* initialize timer for burst mode timeout */
-	memset(&itv, 0, sizeof(itv));
-	itv.it_value.tv_sec = 0;
-	itv.it_value.tv_usec = BURST_MODE_TIMEOUT;
-
 	/* setup poll() data */
 	memset(fds, 0 , sizeof(fds));
 	fds[0].fd = random_fd;
-	fds[0].events = POLLIN;
+	fds[0].events = POLLOUT;
 
 	/* run as daemon if requested to do so */
 	if (user_ops.run_as_daemon) {
@@ -374,7 +369,7 @@ int main(int argc, char **argv)
 		/* We should have data here, if not then something bad happened above and we should wait and try again */
 		if (buffsize == 0) {
 			log_print(ERROR, "ERROR: Timeout getting valid random data from hardware.");
-			usleep(1000000);	/* 1000ms (1 sec) */
+			usleep(100000);	/* 100ms */
 			continue;
 		}
 
@@ -387,54 +382,33 @@ int main(int argc, char **argv)
 		/* convert entropy bits to bytes */
 		ent_count >>= 3;
 
-		/* Check and fill entropy pool */
-		if (ent_count < MAX_ENT_POOL_HIGHWATER_MARK) {
-			write_size = min(buffsize, MAX_ENT_POOL_WRITES);
+		/* fill entropy pool */
+		write_size = min(buffsize, MAX_ENT_POOL_WRITES);
 
-			/* Write some data to the device */
-			rand->entropy_count = write_size * 8;
-			rand->buf_size      = write_size;
-			memcpy(rand->buf, &databuf[curridx], write_size);
-			curridx  += write_size;
-			buffsize -= write_size;
+		/* Write some data to the device */
+		rand->entropy_count = write_size * 8;
+		rand->buf_size      = write_size;
+		memcpy(rand->buf, &databuf[curridx], write_size);
+		curridx  += write_size;
+		buffsize -= write_size;
 
-			/* Issue the ioctl to increase the entropy count */
-			if (ioctl(random_fd, RNDADDENTROPY, rand) < 0) {
-				log_print(ERROR,"ERROR: RNDADDENTROPY ioctl() failed.");
-				exitval = 1;
-				goto exit;
-			}
+		/* Issue the ioctl to increase the entropy count */
+		if (ioctl(random_fd, RNDADDENTROPY, rand) < 0) {
+			log_print(ERROR,"ERROR: RNDADDENTROPY ioctl() failed.");
+			exitval = 1;
+			goto exit;
 		}
 
-		/* If a user is not read-blocked, then wait a bit before we continue.
-		 * This must happen before the device is polled for a block or else
-		 * performance will be low.
-		 */
-		if (!read_blocked)
-			usleep(IDLE_MODE_WAIT);
-
-		/* Check if a user is blocked */
-		ret = poll(fds, 1, 0);
-		if (ret == 0) {
-			read_blocked = TRUE;
-			/* Set/Reset timer to keep us in burst mode for a bit */
-			setitimer(ITIMER_REAL, &itv, NULL);
-			timer_enabled = TRUE;
+		/* Wait if entropy pool is full */
+		ret = poll(fds, 1, -1);
+		if (ret < 0) {
+			log_print(ERROR,"ERROR: poll call failed.");
+			/* wait if error */
+			usleep(100000);
 		}
 	}
 
 exit:
-	/* stop timer */
-	if (timer_enabled) {
-		memset(&itv, 0, sizeof(itv));
-		setitimer(ITIMER_REAL, &itv, NULL);
-	}
-
-	/* restore original signal action */
-	if (signal_enabled) {
-		sigaction(SIGALRM, &act_org, NULL);
-	}
-
 	/* free other resources */
 	if (rand)
 		free(rand);

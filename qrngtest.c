@@ -169,7 +169,7 @@ static int read_src(int fd, void *buf, size_t size)
 
 	/* read buffer of data */
 	do {
-		ret = poll(fds, 1, 1000);
+		ret = poll(fds, 1, 2000);
 		if (ret == 0)
 			return -2;	/* no data to read */
 
