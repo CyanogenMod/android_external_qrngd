@@ -42,6 +42,9 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/poll.h>
+#include <linux/capability.h>
+#include <sys/prctl.h>
+#include <private/android_filesystem_config.h>
 
 #ifdef ANDROID_CHANGES
 #include <android/log.h>
@@ -266,6 +269,37 @@ static int read_src(int fd, void *buf, size_t size)
 	return 0;
 }
 
+/*Hold minimal permissions, so as to get IOCTL working*/
+static int qrng_update_cap()
+{
+	int retvalue = 0;
+	struct __user_cap_header_struct header;
+	struct __user_cap_data_struct cap;
+
+	memset(&header, 0, sizeof(header));
+	memset(&cap, 0, sizeof(cap));
+	prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0);
+	if( 0 != setgid(AID_SYSTEM)){
+		fprintf(stderr, "setgid error\n");
+		return -1;
+	}
+	if( 0 != setuid(AID_SYSTEM)){
+		fprintf(stderr, "setuid error\n");
+		return -1;
+	}
+	header.version = _LINUX_CAPABILITY_VERSION;
+	header.pid = 0;
+	cap.effective = (1 << CAP_SYS_ADMIN) | (1 << CAP_NET_RAW);
+	cap.permitted = cap.effective;
+	cap.inheritable = 0;
+	retvalue = capset(&header, &cap);
+	if(retvalue != 0){
+		fprintf(stderr, "capset error\n");
+		return -1;
+	}
+	return 0;
+}
+
 /* The beginning of everything */
 int main(int argc, char **argv)
 {
@@ -278,6 +312,13 @@ int main(int argc, char **argv)
 	struct pollfd fds[1];			/* used for polling file descriptor  */
 	int ret;
 	int exitval = 0;
+
+	/*Hold minimal permissions, just enough to get IOCTL working*/
+	if(0 != qrng_update_cap()){
+		log_print(ERROR, "qrngd permission reset failed, exiting\n");
+		exitval = 1;
+		goto exit;
+	}
 
 	/* set default parameters */
 	user_ops.run_as_daemon = TRUE;
