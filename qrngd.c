@@ -313,13 +313,6 @@ int main(int argc, char **argv)
 	int ret;
 	int exitval = 0;
 
-	/*Hold minimal permissions, just enough to get IOCTL working*/
-	if(0 != qrng_update_cap()){
-		log_print(ERROR, "qrngd permission reset failed, exiting\n");
-		exitval = 1;
-		goto exit;
-	}
-
 	/* set default parameters */
 	user_ops.run_as_daemon = TRUE;
 	strcpy(user_ops.input_device_name, RANDOM_DEVICE_HW);
@@ -340,6 +333,13 @@ int main(int argc, char **argv)
 	random_hw_fd = open(user_ops.input_device_name, O_RDONLY);
 	if (random_hw_fd < 0) {
 		fprintf(stderr, "Can't open hardware random device file %s\n", user_ops.input_device_name);
+		exitval = 1;
+		goto exit;
+	}
+
+	/*Hold minimal permissions, just enough to get IOCTL working*/
+	if(0 != qrng_update_cap()){
+		log_print(ERROR, "qrngd permission reset failed, exiting\n");
 		exitval = 1;
 		goto exit;
 	}
